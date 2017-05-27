@@ -7,19 +7,13 @@ Yin, W.; Schutze, H.; Xiang, B.; and Zhou, B.
 import tensorflow as tf
 import numpy as np
 
-DEFAULT_CONFIG = [{'type':'ABCNN-1','w':3, 'n':50, 'nl':'tanh'}]
-DEFAULT_CONFIG.append({'type':'ABCNN-2','w':3, 'n':50, 'nl':'tanh'})
-DEFAULT_CONFIG.append({'type':'ABCNN-3','w':3, 'n':50, 'nl':'tanh'})
-DEFAULT_CONFIG.append({'type':'BCNN','w':3, 'n':50, 'nl':'tanh'})
+DEFAULT_CONFIG = [{'type':'ABCNN-3','w':3, 'n':50, 'nl':'tanh'} for _ in range(3)]
 
 class ABCNN:
-	def __init__(self, conv_layers, embed_size, sentence_len, 
-		fc_layers = 0, external_measures = 0, config = DEFAULT_CONFIG):
-		
+	def __init__(self, conv_layers, embed_size, sentence_len, external_measures = 0, config = DEFAULT_CONFIG):
 		self.conv_layers = conv_layers
 		self.embed_size = embed_size
 		self.sentence_len = sentence_len
-		self.fc_layers = fc_layers
 		self.external_measures = external_measures
 		self.config = config
 	
@@ -191,9 +185,6 @@ class ABCNN:
 					avg_pool2 = tf.nn.avg_pool(conv2w,[1,1,config['w'],1],strides=[1,1,1,1],padding="VALID",name='avg_pool2')
 					return avg_pool1, avg_pool2
 
-	def _add_fc():
-		pass
-
 	def build_graph(self, embed_matrix, train_embed_matrix, batch_size):
 		self.global_step = tf.Variable(0, dtype=tf.int32, trainable=False, name='global_step')
 		
@@ -202,7 +193,9 @@ class ABCNN:
 			# self.in2 = tf.placeholder(tf.int32, shape=None, name='in2')
 			self.in1 = tf.placeholder(tf.int32, shape=[batch_size, self.sentence_len], name='in1')
 			self.in2 = tf.placeholder(tf.int32, shape=[batch_size, self.sentence_len], name='in2')
-			self.target = tf.placeholder(tf.int32, shape=[batch_size], name='target')
+			if self.external_measures > 0:
+				self.ext = tf.placeholder(tf.float32, shape=[batch_size, self.external_measures], name='ext_measure')
+			self.target = tf.placeholder(tf.float32, shape=[batch_size], name='target')
 
 		with tf.variable_scope('embedding') as scope:
 			embedding_weights = tf.Variable(initial_value = embed_matrix, dtype = tf.float32, trainable=train_embed_matrix, name = 'embedding_weights')
@@ -234,8 +227,19 @@ class ABCNN:
 			else:
 				raise ValueError('Unrecognised conv layer type')
 
-		for i in range(i, self.fc_layers):
-			_add_fc()
+		with tf.variable_scope('fc') as scope:
+			if self.external_measures > 0:
+				fc_in = tf.concat([layer_input[0],layer_input[1],self.ext],axis=1)
+			else:
+				fc_in = tf.concat([layer_input[0],layer_input[1]],axis=1)
+			w = tf.Variable(tf.truncated_normal([fc_in.get_shape().as_list()[1],1], stddev=0.1, dtype=tf.float32), name='weights')
+			b = tf.Variable(tf.zeros([1], dtype=tf.float32), name="bias")
+
+			logits = tf.matmul(fc_in, w) + b
+			logits = tf.reshape(logits, [-1])
+
+		with tf.name_scope('loss') as scope:
+			self.cross_entropy = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self.target))
 
 	def train():
 		pass
@@ -244,7 +248,7 @@ class ABCNN:
 		pass
 
 if __name__ == '__main__':
-	c = ABCNN(4, 50, 40)
+	c = ABCNN(conv_layers=3, embed_size=50, sentence_len=40)
 	with tf.Session() as sess:
 		c.build_graph(np.random.randn(20,50), 1, 128)
 		sess.run(tf.global_variables_initializer())
