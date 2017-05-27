@@ -7,6 +7,13 @@ Yin, W.; Schutze, H.; Xiang, B.; and Zhou, B.
 import tensorflow as tf
 import numpy as np
 
+'''
+Each config should be a dictionary with entries:
+type	:	Type pf convolutional layer depending of use of attenion map; one of BCNN, ABCNN-1, ABCNN-2, ABCNN-3
+w		:	Width of convolutional kernel
+n		:	Number of convolutional ops
+nl		:	Type of non-linearity; one of 'tanh' or 'relu'
+'''
 DEFAULT_CONFIG = [{'type':'ABCNN-3','w':3, 'n':50, 'nl':'tanh'} for _ in range(3)]
 
 class ABCNN:
@@ -16,6 +23,7 @@ class ABCNN:
 		self.sentence_len = sentence_len
 		self.external_measures = external_measures
 		self.config = config
+		print 'ABCNN params initialised'
 	
 	def _conv_layer(self, config, input):
 		kernel = tf.get_variable('kernel', [input.get_shape()[1], config['w'], input.get_shape()[3], config['n']], initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
@@ -186,6 +194,8 @@ class ABCNN:
 					return avg_pool1, avg_pool2
 
 	def build_graph(self, embed_matrix, train_embed_matrix, batch_size):
+		print 'Building graph...'
+
 		self.global_step = tf.Variable(0, dtype=tf.int32, trainable=False, name='global_step')
 		
 		with tf.name_scope("data"):
@@ -235,22 +245,35 @@ class ABCNN:
 			w = tf.Variable(tf.truncated_normal([fc_in.get_shape().as_list()[1],1], stddev=0.1, dtype=tf.float32), name='weights')
 			b = tf.Variable(tf.zeros([1], dtype=tf.float32), name="bias")
 
-			logits = tf.matmul(fc_in, w) + b
-			logits = tf.reshape(logits, [-1])
+			logit_r = tf.matmul(fc_in, w) + b
+			logits = tf.reshape(logit_r, [-1])
 
-		with tf.name_scope('loss') as scope:
+		with tf.name_scope('loss'):
 			self.cross_entropy = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self.target))
 
-	def train():
-		pass
+		optimizer = tf.train.AdamOptimizer()
+		self.train_step = optimizer.minimize(self.cross_entropy, global_step= self.global_step, name='train_step')
 
-	def test():
-		pass
+		with tf.name_scope('prediction'):
+			self.prediction = tf.round(tf.sigmoid(logits), name='prediction')
+		
+		correct_prediction = tf.equal(self.prediction, self.target)
+		self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
+
+		with tf.name_scope("summaries"):
+			tf.summary.scalar("loss", self.cross_entropy)
+			tf.summary.scalar("accuracy", self.accuracy)
+			tf.summary.histogram("histogram_loss", self.cross_entropy)
+			self.summary_op = tf.summary.merge_all()
+
+		self.init_op = tf.group(tf.global_variables_initializer(),tf.local_variables_initializer())
+
+		print 'Done'
 
 if __name__ == '__main__':
 	c = ABCNN(conv_layers=3, embed_size=50, sentence_len=40)
+	c.build_graph(np.random.randn(20,50), 1, 128)
 	with tf.Session() as sess:
-		c.build_graph(np.random.randn(20,50), 1, 128)
-		sess.run(tf.global_variables_initializer())
+		sess.run( c.init_op )
 		writer = tf.summary.FileWriter('./graph', sess.graph)
 		writer.close()
